@@ -28,6 +28,25 @@ from PIL import Image
 
 import matplotlib.pyplot as plt
 import cv2
+import numpy as np
+
+def caculate_percentage_image(img):
+    brown = [0, 0, 0]  # RGB
+    diff = 20
+    boundaries = [([brown[2]-diff, brown[1]-diff, brown[0]-diff],
+                [brown[2]+diff, brown[1]+diff, brown[0]+diff])]
+    # in order BGR as opencv represents images as numpy arrays in reverse order
+
+    for (lower, upper) in boundaries:
+        lower = np.array(lower, dtype=np.uint8)
+        upper = np.array(upper, dtype=np.uint8)
+        mask = cv2.inRange(img, lower, upper)
+        output = cv2.bitwise_and(img, img, mask=mask)
+
+        ratio_brown = cv2.countNonZero(mask)/(img.size/3)
+        print('brown pixel percentage:', np.round(ratio_brown*100, 2))
+
+
 
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -132,12 +151,12 @@ coco_cats = {} # Call prep_coco_cats to fill this
 coco_cats_inv = {}
 color_cache = defaultdict(lambda: {})
 
-def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, mask_alpha=0.45, fps_str=''):
+def prep_display(dets_out, img, h, w, undo_transform=False, class_color=False, mask_alpha=0.45, fps_str=''):
     """
     Note: If undo_transform=False then im_h and im_w are allowed to be None.
     """
     if undo_transform:
-        img_numpy = undo_image_transformation(img, w, h)
+        img_numpy = undo_image_transformation(img, w, h) #return a image with height and weight of original image input
         img_gpu = torch.Tensor(img_numpy)
     else:
         img_gpu = img / 255.0
@@ -217,15 +236,18 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
     
     if num_dets_to_consider == 0:
         return img_numpy
-
+    img_numpy_cop = img_numpy.copy()
     if args.display_text or args.display_bboxes:
         for j in reversed(range(num_dets_to_consider)):
             x1, y1, x2, y2 = boxes[j, :]
             color = get_color(j)
             score = scores[j]
+            cv2.imwrite("crop_images/"+str(time.time())+".png", img_numpy_cop[y1:y2, x1:x2, :])
+            caculate_percentage_image(img_numpy_cop)
 
             if args.display_bboxes:
-                cv2.rectangle(img_numpy, (x1, y1), (x2, y2), color, 1)
+                cv2.rectangle(img_numpy, (x1, y1), (x2, y2), color, 1)              
+                print(x1, y1, x2, y2)
 
             if args.display_text:
                 _class = cfg.dataset.class_names[classes[j]]
@@ -242,8 +264,7 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
 
                 cv2.rectangle(img_numpy, (x1, y1), (x1 + text_w, y1 - text_h - 4), color, -1)
                 cv2.putText(img_numpy, text_str, text_pt, font_face, font_scale, text_color, font_thickness, cv2.LINE_AA)
-            
-    
+
     return img_numpy
 
 def prep_benchmark(dets_out, h, w):
@@ -581,7 +602,7 @@ def evalimage(net:Yolact, path:str, save_path:str=None):
     frame = torch.from_numpy(cv2.imread(path)).float()
     batch = FastBaseTransform()(frame.unsqueeze(0))
     preds = net(batch)
-
+    print("INFO Line 584 on eval_seg.py: ", preds[0].keys(), len(preds))
     img_numpy = prep_display(preds, frame, None, None, undo_transform=False)
     
     if save_path is None:
